@@ -71,8 +71,12 @@ app.post('/order', async (req, res) => {
             })
         });
 
-        const createText = await createResp.text();
-        console.log("CREATE:", createText);
+const createText = await createResp.text();
+console.log("CREATE:", createText);
+
+if (!createText.includes("SUCCESS")) {
+    throw new Error("Ошибка создания реквизита: " + createText);
+}
 
         // ===== 3. поставить галочку =====
         await fetch(SHEET_WEBHOOK, {
