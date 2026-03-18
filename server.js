@@ -128,5 +128,3 @@ app.post('/order', async (req, res) => {
 // ================= START =================
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("🚀 Server started on port", PORT));
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("🚀 Server started on port", PORT));
