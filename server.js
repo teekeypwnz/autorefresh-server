@@ -87,18 +87,7 @@ app.post('/order', async (req, res) => {
 
         if (!createText.includes("SUCCESS")) throw new Error("Ошибка создания реквизита: " + createText);
 
-        // ===== 3. поставить "Есть рек" =====
-        console.log("✅ Ставим 'Есть рек'...");
-        await fetch(SHEET_WEBHOOK, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                external_id: shortId,
-                setActive: true
-            })
-        });
-
-        // ===== 4. Telegram =====
+        // ===== 3. Telegram =====
         console.log("📨 Отправка в Telegram...");
         const text =
 `✅ Новая выплата с external_id: ${shortId}
