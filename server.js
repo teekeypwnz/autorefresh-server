@@ -19,6 +19,7 @@ const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzQw_kXTGEqXgMBMs
 // Telegram
 const ORDER_TOKEN = "8699312259:AAG1hS9F0nyJfmUOE-Pvj7ysEjdivIRzRy0";
 const ORDER_CHAT = "1031665815";
+
 const LOG_TOKEN = "8690662918:AAHK4ey7irw7yxs-4CUUMxIXtZ-_FjrbRbo";
 const LOG_CHAT = "8690662918";
 
@@ -45,18 +46,29 @@ app.post('/order', async (req, res) => {
     const folderName = `${card} / ${amount} / ${shortId}`;
 
     try {
-        // 1️⃣ запись в таблицу
+        // ===== 1. Добавляем запись в таблицу =====
+        console.log("📊 Пишем новую запись в таблицу...");
         await fetch(SHEET_WEBHOOK, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ external_id: shortId, card, amount })
+            body: JSON.stringify({
+                external_id: shortId,
+                card,
+                amount
+            })
         });
 
-        // 2️⃣ создание реквизита
+        // ===== 2. Создаём реквизит =====
+        console.log("💳 Создаём реквизит...");
         const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
         const createResp = await fetch("https://auth.acesortie.shop/user/offers", {
             method: "POST",
-            headers: { "accept":"*/*","content-type":"application/json","accesstoken": accessToken,"fingerkey": fingerKey },
+            headers: {
+                "accept": "*/*",
+                "content-type": "application/json",
+                "accesstoken": accessToken,
+                "fingerkey": fingerKey
+            },
             body: JSON.stringify({
                 create_active: true,
                 folder_name: folderName,
@@ -70,17 +82,20 @@ app.post('/order', async (req, res) => {
         });
 
         const createText = await createResp.text();
+        console.log("📦 Ответ создания:", createText);
+
         if (!createText.includes("SUCCESS")) throw new Error("Ошибка создания реквизита: " + createText);
 
-        // 3️⃣ ставим галочку
+        // ===== 3. Ставим галочку =====
+        console.log("✅ Ставим галочку 'Реквизит сделан'...");
         await fetch(SHEET_WEBHOOK, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ external_id: shortId, setActive: true })
         });
 
-        // 4️⃣ Telegram
-        const text =
+        // ===== 4. Telegram =====
+        const text = 
 `✅ Новая выплата с external_id: ${shortId}
 Создан реквизит по следующим параметрам:
 Название папки - ${folderName}
@@ -99,11 +114,11 @@ app.post('/order', async (req, res) => {
     } catch (err) {
         console.log("❌ ERROR:", err.message);
 
-        // лог в Telegram
+        // логируем в Loggs
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: LOG_CHAT, text: `❌ ERROR: ${err.message}` })
+            body: JSON.stringify({ chat_id: LOG_CHAT, text: `❌ Ошибка\n${err.message}` })
         });
 
         res.send("error");
@@ -111,5 +126,7 @@ app.post('/order', async (req, res) => {
 });
 
 // ================= START =================
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("🚀 Server started on port", PORT));
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("🚀 Server started on port", PORT));
