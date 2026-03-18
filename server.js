@@ -4,6 +4,19 @@ const app = express();
 
 app.use(express.json());
 
+// ✅ CORS (КРИТИЧНО!)
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+    }
+
+    next();
+});
+
 // ================= CONFIG =================
 const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzQw_kXTGEqXgMBMs7giFhYygV1LR24MvU5uuQyocyWzuV6mhfsap_-Obl0HJ2FfHU-/exec";
 
@@ -27,7 +40,14 @@ const TOKEN_TO = "USDTTRC";
 // ================= MAIN =================
 app.post('/order', async (req, res) => {
 
+    console.log("📩 POST /order:", req.body);
+
     const { external_id, card, amount, accessToken, fingerKey } = req.body;
+
+    if (!external_id || !card || !amount) {
+        console.log("❌ Нет данных");
+        return res.send("error: missing fields");
+    }
 
     const shortId = external_id.slice(0, 10);
     const folderName = `${card} / ${amount} / ${shortId}`;
@@ -35,6 +55,8 @@ app.post('/order', async (req, res) => {
     try {
 
         // ===== 1. запись в таблицу =====
+        console.log("📊 Пишем в таблицу...");
+
         await fetch(SHEET_WEBHOOK, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -46,6 +68,8 @@ app.post('/order', async (req, res) => {
         });
 
         // ===== 2. создание реквизита =====
+        console.log("💳 Создаём реквизит...");
+
         const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
         const createResp = await fetch("https://auth.acesortie.shop/user/offers", {
@@ -71,14 +95,16 @@ app.post('/order', async (req, res) => {
             })
         });
 
-const createText = await createResp.text();
-console.log("CREATE:", createText);
+        const createText = await createResp.text();
+        console.log("📦 Ответ создания:", createText);
 
-if (!createText.includes("SUCCESS")) {
-    throw new Error("Ошибка создания реквизита: " + createText);
-}
+        if (!createText.includes("SUCCESS")) {
+            throw new Error("Ошибка создания реквизита: " + createText);
+        }
 
         // ===== 3. поставить галочку =====
+        console.log("✅ Ставим галочку...");
+
         await fetch(SHEET_WEBHOOK, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -88,7 +114,9 @@ if (!createText.includes("SUCCESS")) {
             })
         });
 
-        // ===== 4. Telegram Order checker =====
+        // ===== 4. Telegram =====
+        console.log("📨 Отправка в Telegram...");
+
         const text =
 `✅ Новый реквизит по выплате с external_id: ${shortId}
 Название папки - ${folderName}
@@ -104,12 +132,14 @@ if (!createText.includes("SUCCESS")) {
             })
         });
 
+        console.log("🎉 Готово");
         res.send("ok");
 
     } catch (err) {
 
-        console.log("ERROR:", err);
+        console.log("❌ ERROR:", err.message);
 
+        // лог в Telegram
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -123,4 +153,8 @@ if (!createText.includes("SUCCESS")) {
     }
 });
 
-app.listen(10000, () => console.log("Server started"));
+// ================= START =================
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log("🚀 Server started on port", PORT);
+});
