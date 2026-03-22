@@ -49,7 +49,6 @@ async function getFolders() {
             "fingerkey": FINGER_KEY
         }
     });
-
     const data = await res.json();
     return data?.result?.folders || [];
 }
@@ -93,14 +92,12 @@ app.post('/order', async (req, res) => {
                     mode: "create",
                     external_id: shortId,
                     card,
-                    amount
+                    amount,
+                    folder_external_id: shortId // короткий id реквизита для связи с приёмом
                 })
             });
 
-            // создаём реквизит
             const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
-
-            const folder_name = `${card} / ${amount} / ${shortId}`;
 
             await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
@@ -112,7 +109,7 @@ app.post('/order', async (req, res) => {
                 },
                 body: JSON.stringify({
                     create_active: true,
-                    folder_name,
+                    folder_name: `${card} / ${amount} / ${shortId}`,
                     payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                     sessions_id: [SESSION_ID],
                     token_from: TOKEN_FROM,
@@ -128,7 +125,7 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `✅ Новая выплата с external_id: ${shortId}\nСоздан реквизит по следующим параметрам:\nНазвание папки - ${folder_name}\nРеквизит - ${card}\nСумма - ${amount}`
+                    text: `✅ Новая выплата с external_id: ${shortId}\nСоздан реквизит по следующим параметрам:\nНазвание папки - ${card} / ${amount} / ${shortId}\nРеквизит - ${card}\nСумма - ${amount}`
                 })
             });
         }
@@ -139,41 +136,38 @@ app.post('/order', async (req, res) => {
             const shortId = order.external_id.slice(0, 10);
             const card = order.payment_details_address;
             const amount = order.creator_amount;
-            const payout_id = order.folder_external_id || order.related_external_id; // external_id выплаты, передавать из фронта если нужно
+            const folderExternalId = order.folder_external_id; // получаем связь с реквизитом выплаты
 
             // таблица
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    mode: "receive",
-                    external_id: payout_id,
-                    receive_external_id: shortId,
+                    mode: "update_receive",
+                    external_id: folderExternalId,
                     card
                 })
             });
 
-            // 🔥 ищем реквизит по названию (включая external_id выплаты)
+            // 🔥 ищем реквизит
             const folders = await getFolders();
-            const target = folders.find(f =>
-                f.name.includes(card) && f.name.includes(amount)
-            );
+            const target = folders.find(f => f.name.includes(card) && f.name.includes(amount));
 
             if (target) {
                 await pauseFolder(target.internal_id);
-
-                // TG
-                await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        chat_id: ORDER_CHAT,
-                        text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${target.name}`
-                    })
-                });
             } else {
-                console.log("⚠️ Реквизит не найден для приёма", card, amount);
+                console.log("⚠️ Реквизит не найден");
             }
+
+            // TG
+            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: ORDER_CHAT,
+                    text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${card} / ${amount} / ${shortId}`
+                })
+            });
         }
 
         res.send("ok");
