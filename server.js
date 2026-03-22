@@ -1,7 +1,7 @@
+// ================= CONFIG =================
 const express = require('express');
 const fetch = require('node-fetch');
 const app = express();
-
 app.use(express.json());
 
 // CORS
@@ -13,7 +13,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// CONFIG
+// ================= CONSTANTS =================
 const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzQw_kXTGEqXgMBMs7giFhYygV1LR24MvU5uuQyocyWzuV6mhfsap_-Obl0HJ2FfHU-/exec";
 
 const ORDER_TOKEN = "8699312259:AAG1hS9F0nyJfmUOE-Pvj7ysEjdivIRzRy0";
@@ -33,7 +33,6 @@ const TOKEN_TO = "USDTTRC";
 
 // ================= MAIN =================
 app.post('/order', async (req, res) => {
-
     const { type, external_id, card, amount, accessToken, fingerKey } = req.body;
 
     if (!external_id || !card || !amount) {
@@ -41,29 +40,26 @@ app.post('/order', async (req, res) => {
     }
 
     const shortId = external_id.slice(0, 10);
+    const folder_name = `${card} / ${amount} / ${shortId}`;
     const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
     try {
-
         // ================= PAYOUT =================
-if (type === "payout") {
+        if (type === "payout") {
+            // Таблица
+            await fetch(SHEET_WEBHOOK, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    type: "payout",
+                    external_id: shortId,
+                    card,
+                    amount,
+                    folder_name
+                })
+            });
 
-    const folder_name = `${card} / ${amount} / ${shortId}`; // ✅ ДОБАВИЛИ
-
-    // таблица
-    await fetch(SHEET_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            type: "payout",
-            external_id: shortId,
-            card,
-            amount,
-            folder_name
-        })
-    });
-
-            // реквизит
+            // Создать реквизит
             await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
                 headers: {
@@ -84,83 +80,72 @@ if (type === "payout") {
                 })
             });
 
-            // telegram
+            // Telegram уведомление
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `✅ Выплата ${shortId}\n${folder_name}`
+                    text: `✅ Новая выплата с external_id: ${shortId}\nСоздан реквизит по следующим параметрам:\nНазвание папки - ${folder_name}\nРеквизит - ${card}\nСумма - ${amount}`
                 })
             });
         }
 
         // ================= RECEIVE =================
 if (type === "receive") {
+    const shortId = external_id.slice(0, 10); // короткий external_id для G
 
-    const shortId = external_id.slice(0, 10);
-
-    // 🔑 НАЙДИ folder_name (пока временно можно оставить старый способ если нет поиска)
-    const folder_name = `${card} / ${amount} / ${shortId}`; // ⚠️ временно
-
+    // Таблица (полный external_id и короткий для G)
     await fetch(SHEET_WEBHOOK, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             type: "receive",
-            external_id: shortId,
+            external_id: external_id, // полный external_id
+            shortId: shortId,         // короткий external_id для записи в G
             folder_name
         })
     });
+}
 
-            // выключение реквизита
-            const folders = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
+            // Выключить реквизит
+            await fetch("https://auth.acesortie.shop/user/offers", {
+                method: "POST",
                 headers: {
+                    "accept": "*/*",
+                    "content-type": "application/json",
                     "accesstoken": accessToken,
                     "fingerkey": fingerKey
-                }
-            }).then(r => r.json());
+                },
+                body: JSON.stringify({
+                    create_active: false,
+                    folder_name,
+                    payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
+                    sessions_id: [SESSION_ID],
+                    token_from: TOKEN_FROM,
+                    override_bucket_id: bucket,
+                    token_to: TOKEN_TO,
+                    type: "SELL"
+                })
+            });
 
-            const target = folders?.result?.folders?.find(f => f.name === folder_name);
-
-            if (target) {
-                await fetch(`https://auth.acesortie.shop/user/payment_details/folders/${target.internal_id}`, {
-                    method: "PATCH",
-                    headers: {
-                        "content-type": "application/json",
-                        "accesstoken": accessToken,
-                        "fingerkey": fingerKey
-                    },
-                    body: JSON.stringify({ status: "PAUSED" })
-                });
-            }
-
-            // telegram
+            // Telegram уведомление
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Приём ${shortId}\n${folder_name}`
+                    text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name}`
                 })
             });
         }
 
         res.send("ok");
-
-    } catch (err) {
-
-        await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                chat_id: LOG_CHAT,
-                text: "❌ " + err.message
-            })
-        });
-
+    } catch (error) {
+        console.error(error);
         res.send("error");
     }
 });
 
-app.listen(process.env.PORT || 10000, () => console.log("🚀 Server started"));
+// ================= SERVER =================
+app.listen(3000, () => console.log("Server started on port 3000"));
