@@ -23,7 +23,7 @@ const ORDER_CHAT = "1031665815";
 const LOG_TOKEN = "8690662918:AAHK4ey7irw7yxs-4CUUMxIXtZ-_FjrbRbo";
 const LOG_CHAT = "8690662918";
 
-// реквизиты
+// Реквизиты
 const SESSION_ID = "e3c802b6492874f5c744972ff441b17677d36d916303105e12c7e5a6750704dfac2a87eda0635c34910366c3ea2967fa2e27f34d92647b6aeef220f39ae3ab98";
 const NAME = "Name Name";
 
@@ -38,11 +38,8 @@ const ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRob3JpemVkIjp0c
 const FINGER_KEY = "OhVVAWsw087J6mu14GlKfQAQObtSuVX3";
 
 // ================= HELPERS =================
-
-// получить реквизиты
 async function getFolders() {
     const res = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
-        method: "GET",
         headers: {
             "accept": "*/*",
             "accesstoken": ACCESS_TOKEN,
@@ -53,7 +50,6 @@ async function getFolders() {
     return data?.result?.folders || [];
 }
 
-// выключить реквизит
 async function pauseFolder(internal_id) {
     await fetch(`https://auth.acesortie.shop/user/payment_details/folders/${internal_id}`, {
         method: "PATCH",
@@ -75,14 +71,14 @@ app.post('/order', async (req, res) => {
 
         // ===== PAYOUT =====
         if (type === "payout") {
-
             const shortId = order.external_id.slice(0, 10);
             const card = order.payment_details_address;
             const amount = order.creator_amount;
 
+            // Формируем folder_name для будущего приёма
             const folder_name = `${card} / ${amount} / ${shortId}`;
 
-            // таблица
+            // Google Sheets
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -95,9 +91,9 @@ app.post('/order', async (req, res) => {
                 })
             });
 
-            const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
+            const bucket = amount === 100 ? BUCKET_100 : BUCKET_200;
 
-            // создаём реквизит
+            // Создаём реквизит
             await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
                 headers: {
@@ -108,7 +104,7 @@ app.post('/order', async (req, res) => {
                 },
                 body: JSON.stringify({
                     create_active: true,
-                    folder_name: folder_name,
+                    folder_name,
                     payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                     sessions_id: [SESSION_ID],
                     token_from: TOKEN_FROM,
@@ -117,15 +113,24 @@ app.post('/order', async (req, res) => {
                     type: "SELL"
                 })
             });
+
+            // Telegram
+            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: ORDER_CHAT,
+                    text: `✅ Новая выплата создана:\n${folder_name}`
+                })
+            });
         }
 
         // ===== RECEIVE =====
         if (type === "receive") {
-
             const shortId = order.external_id.slice(0, 10);
-            const folder_name = order.folder_name;
+            const folder_name = order.folder_name; // берём folder_name из payout
 
-            // таблица
+            // Google Sheets
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -136,34 +141,39 @@ app.post('/order', async (req, res) => {
                 })
             });
 
-            // 🔥 ищем строго по имени
+            // Выключаем реквизит
             const folders = await getFolders();
             const target = folders.find(f => f.name === folder_name);
+            if (target) await pauseFolder(target.internal_id);
 
-            if (target) {
-                await pauseFolder(target.internal_id);
-            } else {
-                console.log("❌ Folder не найден:", folder_name);
-            }
+            // Telegram
+            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: ORDER_CHAT,
+                    text: `📥 Новая заявка на приём:\n${folder_name}`
+                })
+            });
         }
 
         res.send("ok");
 
     } catch (err) {
-        console.log("ERROR:", err.message);
-
+        console.log("❌ ERROR:", err.message);
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 chat_id: LOG_CHAT,
-                text: "❌ " + err.message
+                text: "❌ ERROR: " + err.message
             })
         });
-
         res.send("error");
     }
 });
+
+app.listen(10000, () => console.log("🚀 Server started"));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("🚀 Server started"));
