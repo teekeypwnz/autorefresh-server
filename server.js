@@ -1,3 +1,10 @@
+const express = require('express');
+const fetch = require('node-fetch');
+const app = express();
+
+// для обработки JSON
+app.use(express.json());
+
 // ================= CONFIG =================
 const express = require('express');
 const fetch = require('node-fetch');
@@ -92,21 +99,17 @@ app.post('/order', async (req, res) => {
         }
 
         // ================= RECEIVE =================
-if (type === "receive") {
-    const shortId = external_id.slice(0, 10); // короткий external_id для G
-
-    // Таблица (полный external_id и короткий для G)
-    await fetch(SHEET_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            type: "receive",
-            external_id: external_id, // полный external_id
-            shortId: shortId,         // короткий external_id для записи в G
-            folder_name
-        })
-    });
-}
+        if (type === "receive") {
+            // Таблица (только external_id)
+            await fetch(SHEET_WEBHOOK, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    type: "receive",
+                    external_id: shortId,
+                    folder_name
+                })
+            });
 
             // Выключить реквизит
             await fetch("https://auth.acesortie.shop/user/offers", {
