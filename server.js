@@ -43,53 +43,65 @@ app.post('/order', async (req, res) => {
     const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
     try {
-        // ================= PAYOUT =================
-        if (type === "payout") {
-            // Таблица
-            await fetch(SHEET_WEBHOOK, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: "payout",
-                    external_id: shortId,
-                    card,
-                    amount,
-                    folder_name
-                })
-            });
+// ================= PAYOUT =================
+if (type === "payout") {
 
-            // Создать реквизит
-            await fetch("https://auth.acesortie.shop/user/offers", {
-                method: "POST",
-                headers: {
-                    "accept": "*/*",
-                    "content-type": "application/json",
-                    "accesstoken": accessToken,
-                    "fingerkey": fingerKey
-                },
-                body: JSON.stringify({
-                    create_active: true,
-                    folder_name,
-                    payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
-                    sessions_id: [SESSION_ID],
-                    token_from: TOKEN_FROM,
-                    override_bucket_id: bucket,
-                    token_to: TOKEN_TO,
-                    type: "SELL"
-                })
-            });
+    // Формируем короткий external_id и folder_name
+    const shortId = external_id.slice(0, 10);
+    const folder_name = `${card} / ${amount} / ${shortId}`;
+    const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
-            // Telegram уведомление
-            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    chat_id: ORDER_CHAT,
-                    text: `✅ Новая выплата с external_id: ${shortId}\nСоздан реквизит по следующим параметрам:\nНазвание папки - ${folder_name}\nРеквизит - ${card}\nСумма - ${amount}`
-                })
-            });
-        }
+    console.log("PAYOUT POST to Sheets:", {
+        shortId,
+        card,
+        amount,
+        folder_name
+    });
 
+    // ------------------- Таблица -------------------
+    await fetch(SHEET_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            type: "payout",
+            external_id: shortId,
+            card,
+            amount,
+            folder_name
+        })
+    });
+
+    // ------------------- Создать реквизит -------------------
+    await fetch("https://auth.acesortie.shop/user/offers", {
+        method: "POST",
+        headers: {
+            "accept": "*/*",
+            "content-type": "application/json",
+            "accesstoken": accessToken,
+            "fingerkey": fingerKey
+        },
+        body: JSON.stringify({
+            create_active: true,
+            folder_name,
+            payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
+            sessions_id: [SESSION_ID],
+            token_from: TOKEN_FROM,
+            override_bucket_id: bucket,
+            token_to: TOKEN_TO,
+            type: "SELL"
+        })
+    });
+
+    // ------------------- Telegram уведомление -------------------
+    await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: ORDER_CHAT,
+            text: `✅ Новая выплата с external_id: ${shortId}\nСоздан реквизит по следующим параметрам:\nНазвание папки - ${folder_name}\nРеквизит - ${card}\nСумма - ${amount}`
+        })
+    });
+}
         // ================= RECEIVE =================
         if (type === "receive") {
             // Таблица (только external_id)
