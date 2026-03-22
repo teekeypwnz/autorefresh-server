@@ -38,8 +38,6 @@ const ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRob3JpemVkIjp0c
 const FINGER_KEY = "OhVVAWsw087J6mu14GlKfQAQObtSuVX3";
 
 // ================= HELPERS =================
-
-// получить реквизиты
 async function getFolders() {
     const res = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
         method: "GET",
@@ -53,7 +51,6 @@ async function getFolders() {
     return data?.result?.folders || [];
 }
 
-// выключить реквизит
 async function pauseFolder(internal_id) {
     await fetch(`https://auth.acesortie.shop/user/payment_details/folders/${internal_id}`, {
         method: "PATCH",
@@ -72,28 +69,26 @@ app.post('/order', async (req, res) => {
     const { type, order } = req.body;
 
     try {
-
-        // ===== PAYOUT =====
         if (type === "payout") {
             const shortId = order.external_id.slice(0, 10);
             const card = order.payment_details_address;
             const amount = order.creator_amount;
-
             const folder_name = `${card} / ${amount} / ${shortId}`;
 
-            // таблица
+            // запись в таблицу
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     mode: "create",
-                    external_id: order.external_id, // полный external_id, Apps Script возьмёт slice
+                    external_id: shortId,
                     card,
-                    amount
-                    // folder_name формируется в Apps Script
+                    amount,
+                    folder_name
                 })
             });
 
+            // выбор bucket
             const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
             // создаём реквизит
@@ -123,17 +118,18 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `✅ Новая выплата\nexternal_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nПапка: ${folder_name}`
+                    text: `✅ Новая выплата с external_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nFolder: ${folder_name}`
                 })
             });
         }
 
-        // ===== RECEIVE =====
         if (type === "receive") {
             const shortId = order.external_id.slice(0, 10);
+            const card = order.payment_details_address;
+            const amount = order.creator_amount;
             const folder_name = order.folder_name;
 
-            // таблица
+            // запись в таблицу
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -144,15 +140,10 @@ app.post('/order', async (req, res) => {
                 })
             });
 
-            // 🔥 ищем реквизит строго по folder_name
+            // поиск реквизита строго по folder_name
             const folders = await getFolders();
             const target = folders.find(f => f.name === folder_name);
-
-            if (target) {
-                await pauseFolder(target.internal_id);
-            } else {
-                console.log("❌ Folder не найден:", folder_name);
-            }
+            if (target) await pauseFolder(target.internal_id);
 
             // TG уведомление
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
@@ -160,7 +151,7 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Заявка на приём\nexternal_id: ${shortId}\nРеквизит: ${folder_name} выключен`
+                    text: `📥 Заявка на приём с external_id: ${shortId}\nРеквизит "${folder_name}" выключен`
                 })
             });
         }
