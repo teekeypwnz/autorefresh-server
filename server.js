@@ -49,7 +49,6 @@ async function getFolders() {
             "fingerkey": FINGER_KEY
         }
     });
-
     const data = await res.json();
     return data?.result?.folders || [];
 }
@@ -72,13 +71,6 @@ async function pauseFolder(internal_id) {
     });
 }
 
-// проверка на дубль в Google Sheets
-async function isAlreadyProcessed(shortId) {
-    const res = await fetch(`${SHEET_WEBHOOK}?check=${shortId}`);
-    const data = await res.json();
-    return data.exists;
-}
-
 // ================= MAIN =================
 app.post('/order', async (req, res) => {
     const { type, order } = req.body;
@@ -90,12 +82,6 @@ app.post('/order', async (req, res) => {
 
         // ===== PAYOUT =====
         if (type === "payout") {
-
-            // проверка дубля
-            if (await isAlreadyProcessed(shortId)) {
-                console.log("⚠️ Выплата уже обработана, пропускаем");
-                return res.send("ok");
-            }
 
             // таблица
             await fetch(SHEET_WEBHOOK, {
@@ -146,20 +132,15 @@ app.post('/order', async (req, res) => {
         // ===== RECEIVE =====
         if (type === "receive") {
 
-            // проверка дубля
-            if (await isAlreadyProcessed(shortId)) {
-                console.log("⚠️ Заявка на приём уже обработана, пропускаем");
-                return res.send("ok");
-            }
-
-            // таблица
+            // таблица: ищем строку payout по shortId
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    mode: "receive",
+                    mode: "update_receive",
                     external_id: shortId,
-                    card
+                    card,
+                    status: "не пришла"
                 })
             });
 
@@ -170,11 +151,7 @@ app.post('/order', async (req, res) => {
             );
 
             if (target) {
-                if (target.status !== "PAUSED") {
-                    await pauseFolder(target.internal_id);
-                } else {
-                    console.log("ℹ️ Реквизит уже выключен, не трогаем");
-                }
+                await pauseFolder(target.internal_id);
             } else {
                 console.log("⚠️ Реквизит не найден");
             }
@@ -185,7 +162,7 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Приём ${shortId} | реквизит обработан`
+                    text: `📥 Приём ${shortId} | реквизит выключен`
                 })
             });
         }
@@ -193,7 +170,6 @@ app.post('/order', async (req, res) => {
         res.send("ok");
 
     } catch (err) {
-
         console.log("ERROR:", err.message);
 
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
