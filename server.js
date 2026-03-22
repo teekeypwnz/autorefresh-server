@@ -148,4 +148,4 @@ if (type === "receive") {
 });
 
 // ================= SERVER =================
-app.listen(3000, () => console.log("Server started on port 10000"));
+app.listen(10000, () => console.log("Server started on port 10000"));
