@@ -55,7 +55,6 @@ async function getFolders() {
 
 // выключить реквизит
 async function pauseFolder(internal_id) {
-    console.log("⛔ Выключаем реквизит:", internal_id);
     await fetch(`https://auth.acesortie.shop/user/payment_details/folders/${internal_id}`, {
         method: "PATCH",
         headers: {
@@ -76,8 +75,7 @@ app.post('/order', async (req, res) => {
 
         // ===== PAYOUT =====
         if (type === "payout") {
-
-            const shortId = order.external_id.slice(0, 10);   // короткий external_id
+            const shortId = order.external_id.slice(0, 10);
             const card = order.payment_details_address;
             const amount = order.creator_amount;
 
@@ -89,10 +87,10 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     mode: "create",
-                    external_id: shortId,
+                    external_id: order.external_id, // полный external_id, Apps Script возьмёт slice
                     card,
-                    amount,
-                    folder_name
+                    amount
+                    // folder_name формируется в Apps Script
                 })
             });
 
@@ -109,7 +107,7 @@ app.post('/order', async (req, res) => {
                 },
                 body: JSON.stringify({
                     create_active: true,
-                    folder_name: folder_name,
+                    folder_name,
                     payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                     sessions_id: [SESSION_ID],
                     token_from: TOKEN_FROM,
@@ -119,20 +117,19 @@ app.post('/order', async (req, res) => {
                 })
             });
 
-            // Telegram уведомление
+            // TG уведомление
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `✅ Новая выплата\nexternal_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nfolder_name: ${folder_name}`
+                    text: `✅ Новая выплата\nexternal_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nПапка: ${folder_name}`
                 })
             });
         }
 
         // ===== RECEIVE =====
         if (type === "receive") {
-
             const shortId = order.external_id.slice(0, 10);
             const folder_name = order.folder_name;
 
@@ -147,7 +144,7 @@ app.post('/order', async (req, res) => {
                 })
             });
 
-            // 🔥 ищем строго по имени и выключаем реквизит
+            // 🔥 ищем реквизит строго по folder_name
             const folders = await getFolders();
             const target = folders.find(f => f.name === folder_name);
 
@@ -157,13 +154,13 @@ app.post('/order', async (req, res) => {
                 console.log("❌ Folder не найден:", folder_name);
             }
 
-            // Telegram уведомление
+            // TG уведомление
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Новая заявка на приём\nexternal_id: ${shortId}\nВыключен реквизит: ${folder_name}`
+                    text: `📥 Заявка на приём\nexternal_id: ${shortId}\nРеквизит: ${folder_name} выключен`
                 })
             });
         }
@@ -172,7 +169,6 @@ app.post('/order', async (req, res) => {
 
     } catch (err) {
         console.log("ERROR:", err.message);
-
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -181,15 +177,9 @@ app.post('/order', async (req, res) => {
                 text: "❌ " + err.message
             })
         });
-
         res.send("error");
     }
 });
 
-// ================= PORT =================
-const PORT = process.env.PORT;
-if (!PORT) {
-    console.error("❌ Не задан PORT в окружении!");
-    process.exit(1);
-}
-app.listen(PORT, () => console.log(`🚀 Server started on port ${PORT}`));
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("🚀 Server started"));
