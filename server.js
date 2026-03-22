@@ -34,25 +34,23 @@ const TOKEN_TO = "USDTTRC";
 // ================= MAIN =================
 app.post('/order', async (req, res) => {
 
-const { type, order } = req.body;
+    const { type, external_id, card, amount, accessToken, fingerKey } = req.body;
 
-if (!type || !order) {
-    return res.send("error: missing fields");
-}
+    if (!external_id || !card || !amount) {
+        return res.send("error: missing fields");
+    }
+
+    const shortId = external_id.slice(0, 10);
+    const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
     try {
 
         // ================= PAYOUT =================
 if (type === "payout") {
 
-    const shortId = order.external_id.slice(0, 10);
-    const card = order.payment_details_address;
-    const amount = order.creator_amount;
+    const folder_name = `${card} / ${amount} / ${shortId}`; // ✅ ДОБАВИЛИ
 
-    const folder_name = `${card} / ${amount} / ${shortId}`;
-    const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
-
-    // ===== таблица =====
+    // таблица
     await fetch(SHEET_WEBHOOK, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -65,44 +63,46 @@ if (type === "payout") {
         })
     });
 
-    // ===== создание реквизита =====
-    await fetch("https://auth.acesortie.shop/user/offers", {
-        method: "POST",
-        headers: {
-            "accept": "*/*",
-            "content-type": "application/json",
-            "accesstoken": ACCESS_TOKEN,
-            "fingerkey": FINGER_KEY
-        },
-        body: JSON.stringify({
-            create_active: true,
-            folder_name: folder_name,
-            payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
-            sessions_id: [SESSION_ID],
-            token_from: TOKEN_FROM,
-            override_bucket_id: bucket,
-            token_to: TOKEN_TO,
-            type: "SELL"
-        })
-    });
+            // реквизит
+            await fetch("https://auth.acesortie.shop/user/offers", {
+                method: "POST",
+                headers: {
+                    "accept": "*/*",
+                    "content-type": "application/json",
+                    "accesstoken": accessToken,
+                    "fingerkey": fingerKey
+                },
+                body: JSON.stringify({
+                    create_active: true,
+                    folder_name,
+                    payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
+                    sessions_id: [SESSION_ID],
+                    token_from: TOKEN_FROM,
+                    override_bucket_id: bucket,
+                    token_to: TOKEN_TO,
+                    type: "SELL"
+                })
+            });
 
-    // ===== Telegram =====
-    await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            chat_id: ORDER_CHAT,
-            text: `✅ Выплата ${shortId}\n${folder_name}`
-        })
-    });
-}
+            // telegram
+            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: ORDER_CHAT,
+                    text: `✅ Выплата ${shortId}\n${folder_name}`
+                })
+            });
+        }
+
         // ================= RECEIVE =================
 if (type === "receive") {
 
-    const shortId = order.external_id.slice(0, 10);
-    const folder_name = order.folder_name;
+    const shortId = external_id.slice(0, 10);
 
-    // ===== таблица =====
+    // 🔑 НАЙДИ folder_name (пока временно можно оставить старый способ если нет поиска)
+    const folder_name = `${card} / ${amount} / ${shortId}`; // ⚠️ временно
+
     await fetch(SHEET_WEBHOOK, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -113,44 +113,39 @@ if (type === "receive") {
         })
     });
 
-    // ===== ищем реквизит =====
-    const resFolders = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
-        method: "GET",
-        headers: {
-            "accept": "*/*",
-            "accesstoken": ACCESS_TOKEN,
-            "fingerkey": FINGER_KEY
+            // выключение реквизита
+            const folders = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
+                headers: {
+                    "accesstoken": accessToken,
+                    "fingerkey": fingerKey
+                }
+            }).then(r => r.json());
+
+            const target = folders?.result?.folders?.find(f => f.name === folder_name);
+
+            if (target) {
+                await fetch(`https://auth.acesortie.shop/user/payment_details/folders/${target.internal_id}`, {
+                    method: "PATCH",
+                    headers: {
+                        "content-type": "application/json",
+                        "accesstoken": accessToken,
+                        "fingerkey": fingerKey
+                    },
+                    body: JSON.stringify({ status: "PAUSED" })
+                });
+            }
+
+            // telegram
+            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: ORDER_CHAT,
+                    text: `📥 Приём ${shortId}\n${folder_name}`
+                })
+            });
         }
-    });
 
-    const dataFolders = await resFolders.json();
-    const folders = dataFolders?.result?.folders || [];
-
-    const target = folders.find(f => f.name === folder_name);
-
-    if (target) {
-        await fetch(`https://auth.acesortie.shop/user/payment_details/folders/${target.internal_id}`, {
-            method: "PATCH",
-            headers: {
-                "accept": "*/*",
-                "content-type": "application/json",
-                "accesstoken": ACCESS_TOKEN,
-                "fingerkey": FINGER_KEY
-            },
-            body: JSON.stringify({ status: "PAUSED" })
-        });
-    }
-
-    // ===== Telegram =====
-    await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            chat_id: ORDER_CHAT,
-            text: `📥 Приём ${shortId}\n${folder_name}`
-        })
-    });
-}
         res.send("ok");
 
     } catch (err) {
