@@ -58,18 +58,20 @@ if (type === "payout") {
         folder_name
     });
 
-    // ------------------- Таблица -------------------
-    await fetch(SHEET_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            type: "payout",
-            external_id: shortId,
-            card,
-            amount,
-            folder_name
-        })
-    });
+// ------------------- Таблица -------------------
+const folder_name_for_sheet = `${shortId} / ${amount} / ${card}`; // жёсткий формат для таблицы
+
+await fetch(SHEET_WEBHOOK, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+        type: "payout",
+        external_id: shortId,
+        card,
+        amount,
+        folder_name: folder_name_for_sheet // отправляем корректный folder_name
+    })
+});
 
     // ------------------- Создать реквизит -------------------
     await fetch("https://auth.acesortie.shop/user/offers", {
@@ -103,49 +105,51 @@ if (type === "payout") {
     });
 }
         // ================= RECEIVE =================
-        if (type === "receive") {
-            // Таблица (только external_id)
-            await fetch(SHEET_WEBHOOK, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: "receive",
-                    external_id: shortId,
-                    folder_name
-                })
-            });
+if (type === "receive") {
+    // Формируем folder_name в едином формате для поиска строки
+    const folder_name_for_sheet = `${card} / ${amount} / ${shortId}`;
 
-            // Выключить реквизит
-            await fetch("https://auth.acesortie.shop/user/offers", {
-                method: "POST",
-                headers: {
-                    "accept": "*/*",
-                    "content-type": "application/json",
-                    "accesstoken": accessToken,
-                    "fingerkey": fingerKey
-                },
-                body: JSON.stringify({
-                    create_active: false,
-                    folder_name,
-                    payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
-                    sessions_id: [SESSION_ID],
-                    token_from: TOKEN_FROM,
-                    override_bucket_id: bucket,
-                    token_to: TOKEN_TO,
-                    type: "SELL"
-                })
-            });
+    // ------------------- Таблица -------------------
+    await fetch(SHEET_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            type: "receive",
+            external_id: shortId,          // короткий external_id
+            folder_name: folder_name_for_sheet // используем тот же формат, что и в payout
+        })
+    });
 
-            // Telegram уведомление
-            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    chat_id: ORDER_CHAT,
-                    text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name}`
-                })
-            });
-        }
+    // ------------------- Выключение реквизита -------------------
+    await fetch("https://auth.acesortie.shop/user/offers", {
+        method: "POST",
+        headers: {
+            "accept": "*/*",
+            "content-type": "application/json",
+            "accesstoken": accessToken,
+            "fingerkey": fingerKey
+        },
+        body: JSON.stringify({
+            create_active: false,
+            folder_name: folder_name_for_sheet, // единый формат
+            payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
+            sessions_id: [SESSION_ID],
+            token_from: TOKEN_FROM,
+            override_bucket_id: bucket,
+            token_to: TOKEN_TO,
+            type: "SELL"
+        })
+    });
+    // ------------------- Telegram -------------------
+    await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: ORDER_CHAT,
+            text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name_for_sheet}`
+        })
+    });
+}
 
         res.send("ok");
     } catch (error) {
