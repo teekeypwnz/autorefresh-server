@@ -187,5 +187,9 @@ app.post('/order', async (req, res) => {
 });
 
 // ================= PORT =================
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT;
+if (!PORT) {
+    console.error("❌ Не задан PORT в окружении!");
+    process.exit(1);
+}
 app.listen(PORT, () => console.log(`🚀 Server started on port ${PORT}`));
