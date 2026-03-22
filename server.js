@@ -37,9 +37,6 @@ const TOKEN_TO = "USDTTRC";
 const ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRob3JpemVkIjp0cnVlLCJleHAiOjIxMzI2MzM3OTZ9.2LhX8aepRagUQsdWfwVTF6z-tC-3STg6yyiDSjL9hKs";
 const FINGER_KEY = "OhVVAWsw087J6mu14GlKfQAQObtSuVX3";
 
-// ================= АНТИ-ДУБЛИ =================
-const processedReceive = new Set();
-
 // ================= HELPERS =================
 
 // получить все реквизиты
@@ -75,18 +72,30 @@ async function pauseFolder(internal_id) {
     });
 }
 
+// проверка на дубль в Google Sheets
+async function isAlreadyProcessed(shortId) {
+    const res = await fetch(`${SHEET_WEBHOOK}?check=${shortId}`);
+    const data = await res.json();
+    return data.exists;
+}
+
 // ================= MAIN =================
 app.post('/order', async (req, res) => {
     const { type, order } = req.body;
 
     try {
+        const shortId = order.external_id.slice(0, 10);
+        const card = order.payment_details_address;
+        const amount = order.creator_amount;
 
         // ===== PAYOUT =====
         if (type === "payout") {
 
-            const shortId = order.external_id.slice(0, 10);
-            const card = order.payment_details_address;
-            const amount = order.creator_amount;
+            // проверка дубля
+            if (await isAlreadyProcessed(shortId)) {
+                console.log("⚠️ Выплата уже обработана, пропускаем");
+                return res.send("ok");
+            }
 
             // таблица
             await fetch(SHEET_WEBHOOK, {
@@ -137,18 +146,11 @@ app.post('/order', async (req, res) => {
         // ===== RECEIVE =====
         if (type === "receive") {
 
-            const shortId = order.external_id.slice(0, 10);
-
-            // 🔒 АНТИ-ДУБЛЬ
-            if (processedReceive.has(shortId)) {
-                console.log("⛔ ДУБЛЬ receive:", shortId);
-                return res.send("duplicate");
+            // проверка дубля
+            if (await isAlreadyProcessed(shortId)) {
+                console.log("⚠️ Заявка на приём уже обработана, пропускаем");
+                return res.send("ok");
             }
-
-            processedReceive.add(shortId);
-
-            const card = order.payment_details_address;
-            const amount = order.creator_amount;
 
             // таблица
             await fetch(SHEET_WEBHOOK, {
@@ -161,15 +163,18 @@ app.post('/order', async (req, res) => {
                 })
             });
 
-            // ищем реквизит
+            // 🔥 ищем реквизит
             const folders = await getFolders();
-
             const target = folders.find(f =>
                 f.name.includes(card) && f.name.includes(amount)
             );
 
             if (target) {
-                await pauseFolder(target.internal_id);
+                if (target.status !== "PAUSED") {
+                    await pauseFolder(target.internal_id);
+                } else {
+                    console.log("ℹ️ Реквизит уже выключен, не трогаем");
+                }
             } else {
                 console.log("⚠️ Реквизит не найден");
             }
@@ -180,7 +185,7 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Приём ${shortId} | реквизит выключен`
+                    text: `📥 Приём ${shortId} | реквизит обработан`
                 })
             });
         }
