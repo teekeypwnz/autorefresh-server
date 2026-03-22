@@ -69,13 +69,14 @@ app.post('/order', async (req, res) => {
     const { type, order } = req.body;
 
     try {
+        // ===== PAYOUT =====
         if (type === "payout") {
             const shortId = order.external_id.slice(0, 10);
             const card = order.payment_details_address;
             const amount = order.creator_amount;
-            const folder_name = `${card} / ${amount} / ${shortId}`;
+            const folderName = `${card} / ${amount} / ${shortId}`;
 
-            // запись в таблицу
+            // Google Sheet
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -84,14 +85,13 @@ app.post('/order', async (req, res) => {
                     external_id: shortId,
                     card,
                     amount,
-                    folder_name
+                    folder_name: folderName
                 })
             });
 
-            // выбор bucket
             const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
-            // создаём реквизит
+            // Создаём реквизит
             await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
                 headers: {
@@ -102,7 +102,7 @@ app.post('/order', async (req, res) => {
                 },
                 body: JSON.stringify({
                     create_active: true,
-                    folder_name,
+                    folder_name: folderName,
                     payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                     sessions_id: [SESSION_ID],
                     token_from: TOKEN_FROM,
@@ -111,63 +111,40 @@ app.post('/order', async (req, res) => {
                     type: "SELL"
                 })
             });
-
-            // TG уведомление
-            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    chat_id: ORDER_CHAT,
-                    text: `✅ Новая выплата с external_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nFolder: ${folder_name}`
-                })
-            });
         }
 
+        // ===== RECEIVE =====
         if (type === "receive") {
             const shortId = order.external_id.slice(0, 10);
-            const card = order.payment_details_address;
-            const amount = order.creator_amount;
-            const folder_name = order.folder_name;
+            const folderName = order.folder_name;
 
-            // запись в таблицу
+            // Google Sheet
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     mode: "update_receive",
-                    folder_name,
+                    folder_name: folderName,
                     external_id_receive: shortId
                 })
             });
 
-            // поиск реквизита строго по folder_name
+            // Выключаем реквизит
             const folders = await getFolders();
-            const target = folders.find(f => f.name === folder_name);
+            const target = folders.find(f => f.name === folderName);
             if (target) await pauseFolder(target.internal_id);
-
-            // TG уведомление
-            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    chat_id: ORDER_CHAT,
-                    text: `📥 Заявка на приём с external_id: ${shortId}\nРеквизит "${folder_name}" выключен`
-                })
-            });
         }
 
         res.send("ok");
-
     } catch (err) {
         console.log("ERROR:", err.message);
+
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                chat_id: LOG_CHAT,
-                text: "❌ " + err.message
-            })
+            body: JSON.stringify({ chat_id: LOG_CHAT, text: "❌ " + err.message })
         });
+
         res.send("error");
     }
 });
