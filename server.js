@@ -4,13 +4,16 @@ const app = express();
 
 app.use(express.json());
 
-// ✅ CORS
+// ================= CORS =================
+const ALLOWED_ORIGIN = "https://lk.acesortie.shop";
+
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
-  next();
+    res.header("Access-Control-Allow-Origin", ALLOWED_ORIGIN); // 🔑 только ваш фронт
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.header("Access-Control-Allow-Credentials", "true"); // 🔑 разрешаем credentials
+    if (req.method === "OPTIONS") return res.sendStatus(200);
+    next();
 });
 
 // ================= CONFIG =================
