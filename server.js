@@ -46,32 +46,24 @@ app.post('/order', async (req, res) => {
 // ================= PAYOUT =================
 if (type === "payout") {
 
-    // Формируем короткий external_id и folder_name
     const shortId = external_id.slice(0, 10);
     const folder_name = `${card} / ${amount} / ${shortId}`;
     const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
-    console.log("PAYOUT POST to Sheets:", {
-        shortId,
-        card,
-        amount,
-        folder_name
+    console.log("PAYOUT:", { shortId, card, amount, folder_name });
+
+    // ------------------- Таблица -------------------
+    await fetch(SHEET_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            type: "payout",
+            external_id: shortId,
+            card,
+            amount
+            // ❌ УБРАЛИ folder_name
+        })
     });
-
-// ------------------- Таблица -------------------
-const folder_name_for_sheet = `${shortId} / ${amount} / ${card}`; // жёсткий формат для таблицы
-
-await fetch(SHEET_WEBHOOK, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-        type: "payout",
-        external_id: shortId,
-        card,
-        amount,
-        folder_name: folder_name_for_sheet // отправляем корректный folder_name
-    })
-});
 
     // ------------------- Создать реквизит -------------------
     await fetch("https://auth.acesortie.shop/user/offers", {
@@ -84,7 +76,7 @@ await fetch(SHEET_WEBHOOK, {
         },
         body: JSON.stringify({
             create_active: true,
-            folder_name,
+            folder_name, // ✅ здесь оставляем
             payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
             sessions_id: [SESSION_ID],
             token_from: TOKEN_FROM,
@@ -94,20 +86,28 @@ await fetch(SHEET_WEBHOOK, {
         })
     });
 
-    // ------------------- Telegram уведомление -------------------
+    // ------------------- Telegram -------------------
     await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             chat_id: ORDER_CHAT,
-            text: `✅ Новая выплата с external_id: ${shortId}\nСоздан реквизит по следующим параметрам:\nНазвание папки - ${folder_name}\nРеквизит - ${card}\nСумма - ${amount}`
+            text: `✅ Новая выплата с external_id: ${shortId}
+Создан реквизит по следующим параметрам:
+Название папки - ${folder_name}
+Реквизит - ${card}
+Сумма - ${amount}`
         })
     });
 }
         // ================= RECEIVE =================
 if (type === "receive") {
-    // Формируем folder_name в едином формате для поиска строки
-    const folder_name_for_sheet = `${card} / ${amount} / ${shortId}`;
+
+    const shortId = external_id.slice(0, 10);
+    const folder_name = `${card} / ${amount} / ${shortId}`;
+    const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
+
+    console.log("RECEIVE:", { shortId, card, amount, folder_name });
 
     // ------------------- Таблица -------------------
     await fetch(SHEET_WEBHOOK, {
@@ -115,12 +115,14 @@ if (type === "receive") {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             type: "receive",
-            external_id: shortId,          // короткий external_id
-            folder_name: folder_name_for_sheet // используем тот же формат, что и в payout
+            external_id: shortId,
+            card,
+            amount
+            // ❌ УБРАЛИ folder_name
         })
     });
 
-    // ------------------- Выключение реквизита -------------------
+    // ------------------- Выключить реквизит -------------------
     await fetch("https://auth.acesortie.shop/user/offers", {
         method: "POST",
         headers: {
@@ -131,7 +133,7 @@ if (type === "receive") {
         },
         body: JSON.stringify({
             create_active: false,
-            folder_name: folder_name_for_sheet, // единый формат
+            folder_name, // ✅ используем оригинальный формат
             payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
             sessions_id: [SESSION_ID],
             token_from: TOKEN_FROM,
@@ -140,13 +142,15 @@ if (type === "receive") {
             type: "SELL"
         })
     });
+
     // ------------------- Telegram -------------------
     await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             chat_id: ORDER_CHAT,
-            text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name_for_sheet}`
+            text: `📥 Новая заявка на приём с external_id: ${shortId}
+Выключен реквизит с названием: ${folder_name}`
         })
     });
 }
