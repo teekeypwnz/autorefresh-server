@@ -111,16 +111,15 @@ if (type === "receive") {
 
     // ------------------- Таблица -------------------
     await fetch(SHEET_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            type: "receive",
-            external_id: shortId,
-            card,
-            amount
-            // ❌ УБРАЛИ folder_name
-        })
-    });
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    type: "receive",
+    external_id: shortId,
+    card,
+    amount
+  })
+});
 
     // ------------------- Выключить реквизит -------------------
     await fetch("https://auth.acesortie.shop/user/offers", {
