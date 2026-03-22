@@ -49,6 +49,7 @@ async function getFolders() {
             "fingerkey": FINGER_KEY
         }
     });
+
     const data = await res.json();
     return data?.result?.folders || [];
 }
@@ -76,12 +77,13 @@ app.post('/order', async (req, res) => {
     const { type, order } = req.body;
 
     try {
-        const shortId = order.external_id.slice(0, 10);
-        const card = order.payment_details_address;
-        const amount = order.creator_amount;
 
         // ===== PAYOUT =====
         if (type === "payout") {
+
+            const shortId = order.external_id.slice(0, 10);
+            const card = order.payment_details_address;
+            const amount = order.creator_amount;
 
             // таблица
             await fetch(SHEET_WEBHOOK, {
@@ -98,6 +100,8 @@ app.post('/order', async (req, res) => {
             // создаём реквизит
             const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
+            const folder_name = `${card} / ${amount} / ${shortId}`;
+
             await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
                 headers: {
@@ -108,7 +112,7 @@ app.post('/order', async (req, res) => {
                 },
                 body: JSON.stringify({
                     create_active: true,
-                    folder_name: `${card} / ${amount} / ${shortId}`,
+                    folder_name,
                     payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                     sessions_id: [SESSION_ID],
                     token_from: TOKEN_FROM,
@@ -124,7 +128,7 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `✅ Выплата ${shortId}`
+                    text: `✅ Новая выплата с external_id: ${shortId}\nСоздан реквизит по следующим параметрам:\nНазвание папки - ${folder_name}\nРеквизит - ${card}\nСумма - ${amount}`
                 })
             });
         }
@@ -132,19 +136,24 @@ app.post('/order', async (req, res) => {
         // ===== RECEIVE =====
         if (type === "receive") {
 
-            // таблица: ищем строку payout по shortId
+            const shortId = order.external_id.slice(0, 10);
+            const card = order.payment_details_address;
+            const amount = order.creator_amount;
+            const payout_id = order.folder_external_id || order.related_external_id; // external_id выплаты, передавать из фронта если нужно
+
+            // таблица
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    mode: "update_receive",
-                    external_id: shortId,
-                    card,
-                    status: "не пришла"
+                    mode: "receive",
+                    external_id: payout_id,
+                    receive_external_id: shortId,
+                    card
                 })
             });
 
-            // 🔥 ищем реквизит
+            // 🔥 ищем реквизит по названию (включая external_id выплаты)
             const folders = await getFolders();
             const target = folders.find(f =>
                 f.name.includes(card) && f.name.includes(amount)
@@ -152,24 +161,25 @@ app.post('/order', async (req, res) => {
 
             if (target) {
                 await pauseFolder(target.internal_id);
-            } else {
-                console.log("⚠️ Реквизит не найден");
-            }
 
-            // TG
-            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    chat_id: ORDER_CHAT,
-                    text: `📥 Приём ${shortId} | реквизит выключен`
-                })
-            });
+                // TG
+                await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        chat_id: ORDER_CHAT,
+                        text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${target.name}`
+                    })
+                });
+            } else {
+                console.log("⚠️ Реквизит не найден для приёма", card, amount);
+            }
         }
 
         res.send("ok");
 
     } catch (err) {
+
         console.log("ERROR:", err.message);
 
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
