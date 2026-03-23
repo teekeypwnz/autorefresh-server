@@ -116,7 +116,7 @@ const sheetRes = await fetch(SHEET_WEBHOOK, {
     body: JSON.stringify({
         type: "receive",
         external_id: shortId,
-        folder_name: folder_name_for_sheet
+        folder_name: folder_name // заменили folder_name_for_sheet
     })
 });
 
@@ -134,7 +134,7 @@ if (sheetText.trim() === "ok") {
         },
         body: JSON.stringify({
             create_active: false,
-            folder_name: folder_name_for_sheet,
+            folder_name: folder_name, // заменили folder_name_for_sheet
             payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
             sessions_id: [SESSION_ID],
             token_from: TOKEN_FROM,
@@ -150,7 +150,7 @@ if (sheetText.trim() === "ok") {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             chat_id: ORDER_CHAT,
-            text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name_for_sheet}`
+            text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name}`
         })
     });
 } else {
