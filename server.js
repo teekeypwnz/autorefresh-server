@@ -122,7 +122,7 @@ const sheetRes = await fetch(SHEET_WEBHOOK, {
 
 const sheetText = await sheetRes.text();
 
-if (sheetText === "ok") {
+if (sheetText.trim() === "ok") {
     // ------------------- Выключение реквизита -------------------
     await fetch("https://auth.acesortie.shop/user/offers", {
         method: "POST",
