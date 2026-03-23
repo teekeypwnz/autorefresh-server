@@ -100,12 +100,8 @@ if (type === "payout") {
         })
     });
 }
-        // ================= RECEIVE =================
+// ================= RECEIVE =================
 if (type === "receive") {
-
-    // не объявляем заново const, используем ранее объявленные
-    // shortId уже есть
-    // folder_name уже есть
     console.log("RECEIVE:", { shortId, card, amount, folder_name });
 
     // ------------------- Таблица -------------------
@@ -115,7 +111,7 @@ if (type === "receive") {
         body: JSON.stringify({
             type: "receive",
             external_id: shortId,
-            folder_name: folder_name // исправлено
+            folder_name: folder_name // ✅ передаем как есть
         })
     });
 
@@ -133,7 +129,7 @@ if (type === "receive") {
             },
             body: JSON.stringify({
                 create_active: false,
-                folder_name: folder_name, // исправлено
+                folder_name: folder_name, // ✅ используем как есть
                 payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                 sessions_id: [SESSION_ID],
                 token_from: TOKEN_FROM,
