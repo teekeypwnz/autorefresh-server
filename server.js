@@ -109,19 +109,21 @@ if (type === "receive") {
 
     console.log("RECEIVE:", { shortId, card, amount, folder_name });
 
-    // ------------------- Таблица -------------------
-    await fetch(SHEET_WEBHOOK, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    type: "receive",
-    external_id: shortId,
-    card,
-    amount
-  })
+// ------------------- Таблица -------------------
+const sheetRes = await fetch(SHEET_WEBHOOK, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+        type: "receive",
+        external_id: shortId,
+        folder_name: folder_name_for_sheet
+    })
 });
 
-    // ------------------- Выключить реквизит -------------------
+const sheetText = await sheetRes.text();
+
+if (sheetText === "ok") {
+    // ------------------- Выключение реквизита -------------------
     await fetch("https://auth.acesortie.shop/user/offers", {
         method: "POST",
         headers: {
@@ -132,7 +134,7 @@ if (type === "receive") {
         },
         body: JSON.stringify({
             create_active: false,
-            folder_name, // ✅ используем оригинальный формат
+            folder_name: folder_name_for_sheet,
             payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
             sessions_id: [SESSION_ID],
             token_from: TOKEN_FROM,
@@ -148,10 +150,11 @@ if (type === "receive") {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             chat_id: ORDER_CHAT,
-            text: `📥 Новая заявка на приём с external_id: ${shortId}
-Выключен реквизит с названием: ${folder_name}`
+            text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name_for_sheet}`
         })
     });
+} else {
+    console.log(`INFO: RECEIVE для ${shortId} пропущен, G уже заполнен или строка не найдена.`);
 }
 
         res.send("ok");
