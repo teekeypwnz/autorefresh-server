@@ -153,7 +153,8 @@ if (sheetText.trim() === "ok") {
     });
 
 } else {
-    console.log(`INFO: RECEIVE для ${shortId} пропущен, G уже заполнен или строка не найдена.`);
+    console.log(`❌ RECEIVE не обработан для ${shortId}`);
+    console.log("📄 Причина:", sheetText);
 }
 }
 
