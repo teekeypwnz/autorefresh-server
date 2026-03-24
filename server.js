@@ -118,7 +118,7 @@ if (type === "receive") {
 const sheetText = await sheetRes.text();
 
 console.log("📄 SHEET RESPONSE:", sheetText);
-
+console.log("📄 SHEET RESPONSE RAW:", sheetText);
 if (sheetText.trim() === "ok") {
 
     // ------------------- Выключение реквизита -------------------
