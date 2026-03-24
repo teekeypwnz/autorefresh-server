@@ -106,18 +106,22 @@ if (type === "receive") {
 
     // ------------------- Таблица -------------------
     const sheetRes = await fetch(SHEET_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            type: "receive",
-            external_id: shortId,
-            folder_name: folder_name // ✅ передаем как есть
-        })
-    });
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+        type: "receive",
+        external_id: shortId,
+        folder_name: folder_name
+    })
+});
 
-    const sheetText = await sheetRes.text();
+const sheetText = await sheetRes.text();
 
-    if (sheetText.trim() === "ok") {
+console.log("📄 SHEET RESPONSE:", sheetText);
+
+if (sheetText.trim() === "ok") {
+    // выключение реквизита + тг
+}
         // ------------------- Выключение реквизита -------------------
         await fetch("https://auth.acesortie.shop/user/offers", {
             method: "POST",
