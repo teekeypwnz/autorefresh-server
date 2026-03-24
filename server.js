@@ -120,41 +120,41 @@ const sheetText = await sheetRes.text();
 console.log("📄 SHEET RESPONSE:", sheetText);
 
 if (sheetText.trim() === "ok") {
-    // выключение реквизита + тг
-}
-        // ------------------- Выключение реквизита -------------------
-        await fetch("https://auth.acesortie.shop/user/offers", {
-            method: "POST",
-            headers: {
-                "accept": "*/*",
-                "content-type": "application/json",
-                "accesstoken": accessToken,
-                "fingerkey": fingerKey
-            },
-            body: JSON.stringify({
-                create_active: false,
-                folder_name: folder_name, // ✅ используем как есть
-                payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
-                sessions_id: [SESSION_ID],
-                token_from: TOKEN_FROM,
-                override_bucket_id: bucket,
-                token_to: TOKEN_TO,
-                type: "SELL"
-            })
-        });
 
-        // ------------------- Telegram -------------------
-        await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                chat_id: ORDER_CHAT,
-                text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name}`
-            })
-        });
-    } else {
-        console.log(`INFO: RECEIVE для ${shortId} пропущен, G уже заполнен или строка не найдена.`);
-    }
+    // ------------------- Выключение реквизита -------------------
+    await fetch("https://auth.acesortie.shop/user/offers", {
+        method: "POST",
+        headers: {
+            "accept": "*/*",
+            "content-type": "application/json",
+            "accesstoken": accessToken,
+            "fingerkey": fingerKey
+        },
+        body: JSON.stringify({
+            create_active: false,
+            folder_name: folder_name,
+            payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
+            sessions_id: [SESSION_ID],
+            token_from: TOKEN_FROM,
+            override_bucket_id: bucket,
+            token_to: TOKEN_TO,
+            type: "SELL"
+        })
+    });
+
+    // ------------------- Telegram -------------------
+    await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: ORDER_CHAT,
+            text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name}`
+        })
+    });
+
+} else {
+    console.log(`INFO: RECEIVE для ${shortId} пропущен, G уже заполнен или строка не найдена.`);
+}
 }
 
         res.send("ok");
