@@ -104,24 +104,22 @@ if (type === "payout") {
 if (type === "receive") {
     console.log("RECEIVE:", { shortId, card, amount, folder_name });
 
-    // ------------------- Таблица -------------------
-    const sheetRes = await fetch(SHEET_WEBHOOK, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-        type: "receive",
-        external_id: shortId,
-        folder_name: folder_name
-    })
-});
-
-const sheetText = await sheetRes.text();
-
-console.log("📄 SHEET RESPONSE:", sheetText);
-console.log("📄 SHEET RESPONSE RAW:", sheetText);
-if (sheetText.trim() === "ok") {
+    // ------------------- Telegram -------------------
+    await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: ORDER_CHAT,
+            text: `📥 Новая заявка на приём с external_id: ${shortId}, реквизит выключен
+Название папки - ${folder_name}
+Реквизит - ${card}
+Сумма - ${amount}`
+        })
+    });
 
     // ------------------- Выключение реквизита -------------------
+    const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
+
     await fetch("https://auth.acesortie.shop/user/offers", {
         method: "POST",
         headers: {
@@ -132,7 +130,7 @@ if (sheetText.trim() === "ok") {
         },
         body: JSON.stringify({
             create_active: false,
-            folder_name: folder_name,
+            folder_name,
             payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
             sessions_id: [SESSION_ID],
             token_from: TOKEN_FROM,
@@ -142,28 +140,32 @@ if (sheetText.trim() === "ok") {
         })
     });
 
-    // ------------------- Telegram -------------------
-    await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            chat_id: ORDER_CHAT,
-            text: `📥 Новая заявка на приём с external_id: ${shortId}\nВыключен реквизит с названием: ${folder_name}`
-        })
-    });
+    console.log(`✅ Реквизит выключен для folder_name: ${folder_name}`);
 
-} else {
-    console.log(`❌ RECEIVE не обработан для ${shortId}`);
-    console.log("📄 Причина:", sheetText);
-}
-}
+    // ------------------- Таблица (Apps Script) -------------------
+    try {
+        const sheetRes = await fetch(SHEET_WEBHOOK, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                type: "receive",
+                external_id: shortId,
+                folder_name: folder_name
+            })
+        });
 
-        res.send("ok");
-    } catch (error) {
-        console.error(error);
-        res.send("error");
+        const sheetText = await sheetRes.text();
+        console.log("📄 SHEET RESPONSE:", sheetText);
+
+        if (sheetText.trim() === "ok") {
+            console.log(`✅ external_id успешно записан в Google Sheet: ${shortId}`);
+        } else {
+            console.warn(`❌ Google Sheet не вернул ok: ${sheetText}`);
+        }
+    } catch (err) {
+        console.error("❌ Ошибка записи в Google Sheet:", err);
     }
-});
+}
 
 // ================= SERVER =================
 app.listen(3000, () => console.log("Server started on port 3000"));
