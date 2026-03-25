@@ -30,6 +30,8 @@ const TOKEN_TO = "USDTTRC";
 const BUCKET_100 = "1090ab38-bd6d-4192-bd37-dc2bbde93cfe";
 const BUCKET_200 = "436198c9-e60a-4be0-8f10-980f4ea5b401";
 
+const processedReceiveIds = new Set();
+
 // ================= LOGGING =================
 async function sendLog(message) {
     try {
@@ -138,7 +140,17 @@ app.post('/order', async (req, res) => {
 
         // ------------------- RECEIVE -------------------
         if (type === "receive") {
-            await sendLog(`📥 RECEIVE started: ${shortId}`);
+
+    // ✅ защита от дублей
+    if (processedReceiveIds.has(external_id)) {
+        console.log("⏭ RECEIVE уже обработан:", external_id);
+        return res.send("duplicate");
+    }
+
+    // ✅ помечаем как обработанный
+    processedReceiveIds.add(external_id);
+
+    await sendLog(`📥 RECEIVE started: ${shortId}`);
 
             if (!folder_name) {
                 await sendLog(`❌ folder_name отсутствует в receive: ${shortId}`);
