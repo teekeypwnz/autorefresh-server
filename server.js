@@ -13,6 +13,7 @@ app.use((req, res, next) => {
 });
 
 // ================= CONSTANTS =================
+
 const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzQw_kXTGEqXgMBMs7giFhYygV1LR24MvU5uuQyocyWzuV6mhfsap_-Obl0HJ2FfHU-/exec";
 
 const ORDER_TOKEN = "8699312259:AAG1hS9F0nyJfmUOE-Pvj7ysEjdivIRzRy0";
@@ -46,9 +47,38 @@ async function sendLog(message) {
     }
 }
 
+// ================= FOLDERS CACHE =================
+let foldersCache = null;
+async function loadFolders(accessToken, fingerKey) {
+    if (foldersCache) return foldersCache;
+
+    try {
+        const res = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
+            method: "GET",
+            headers: {
+                "accept": "*/*",
+                "content-type": "application/json",
+                "accesstoken": accessToken,
+                "fingerkey": fingerKey
+            }
+        });
+        const data = await res.json();
+        if (data?.status === "SUCCESS" && data?.result?.folders) {
+            foldersCache = data.result.folders;
+            return foldersCache;
+        } else {
+            console.warn("Ошибка получения folders:", data);
+            return [];
+        }
+    } catch (err) {
+        console.warn("Ошибка fetch folders:", err);
+        return [];
+    }
+}
+
 // ================= MAIN =================
 app.post('/order', async (req, res) => {
-    const { type, external_id, card, amount, accessToken, fingerKey } = req.body;
+    const { type, external_id, card, amount, folder_name, accessToken, fingerKey } = req.body;
 
     if (!external_id || !card || !amount) {
         await sendLog(`❌ POST /order: missing fields ${JSON.stringify(req.body)}`);
@@ -56,26 +86,14 @@ app.post('/order', async (req, res) => {
     }
 
     const shortId = external_id.slice(0, 10);
-    const folder_name = `${card} / ${amount} / ${shortId}`;
-    const bucket = amount == 100 ? BUCKET_100 : BUCKET_200;
 
     try {
-        // ================= PAYOUT =================
+        // ------------------- PAYOUT -------------------
         if (type === "payout") {
             console.log("PAYOUT:", { shortId, card, amount, folder_name });
             await sendLog(`✅ PAYOUT received: ${shortId}`);
 
-            await fetch(SHEET_WEBHOOK, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: "payout",
-                    external_id: shortId,
-                    card,
-                    amount
-                })
-            });
-
+            // 🔹 Создаём активный реквизит
             await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
                 headers: {
@@ -90,17 +108,56 @@ app.post('/order', async (req, res) => {
                     payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                     sessions_id: [SESSION_ID],
                     token_from: TOKEN_FROM,
-                    override_bucket_id: bucket,
+                    override_bucket_id: amount === 100 ? BUCKET_100 : BUCKET_200,
                     token_to: TOKEN_TO,
                     type: "SELL"
                 })
             });
+
+            // 🔹 Отправляем в Google Sheet
+            await fetch(SHEET_WEBHOOK, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    type: "payout",
+                    external_id: shortId,
+                    card,
+                    amount,
+                    folder_name
+                })
+            });
         }
 
-        // ================= RECEIVE =================
+        // ------------------- RECEIVE -------------------
         if (type === "receive") {
             console.log("RECEIVE:", { shortId, card, amount, folder_name });
             await sendLog(`📥 RECEIVE started: ${shortId}`);
+
+            // ------------------- Получение folder_id -------------------
+            const folders = await loadFolders(accessToken, fingerKey);
+            const folder = folders.find(f => f.name === folder_name);
+            if (!folder) {
+                await sendLog(`❌ RECEIVE: folder not found for folder_name: ${folder_name}`);
+                return res.send("error: folder not found");
+            }
+            const folder_id = folder.internal_id;
+
+            // ------------------- Выключение реквизита -------------------
+            try {
+                await fetch("https://auth.acesortie.shop/user/offers/pause/all", {
+                    method: "PUT",
+                    headers: {
+                        "accept": "*/*",
+                        "content-type": "application/json",
+                        "accesstoken": accessToken,
+                        "fingerkey": fingerKey
+                    },
+                    body: JSON.stringify({ folder_id })
+                });
+                await sendLog(`✅ Реквизит выключен для folder_name: ${folder_name}`);
+            } catch (err) {
+                await sendLog(`❌ Ошибка pause folder: ${err.message}`);
+            }
 
             // ------------------- Telegram уведомление -------------------
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
@@ -108,64 +165,44 @@ app.post('/order', async (req, res) => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Новая заявка на приём с external_id: ${shortId}, реквизит выключен
-Название папки - ${folder_name}
-Реквизит - ${card}
-Сумма - ${amount}`
+                    text: `📥 Новая заявка на приём с external_id: ${shortId}
+Реквизит выключен
+Название папки: ${folder_name}
+Реквизит: ${card}
+Сумма: ${amount}`
                 })
             });
 
-            // ------------------- Выключение реквизита -------------------
+            // ------------------- Запись в Google Sheet -------------------
             try {
-                await fetch("https://auth.acesortie.shop/user/offers", {
-                    method: "POST",
-                    headers: {
-                        "accept": "*/*",
-                        "content-type": "application/json",
-                        "accesstoken": accessToken,
-                        "fingerkey": fingerKey
-                    },
-                    body: JSON.stringify({
-                        create_active: false,
-                        folder_name,
-                        payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
-                        sessions_id: [SESSION_ID],
-                        token_from: TOKEN_FROM,
-                        override_bucket_id: bucket,
-                        token_to: TOKEN_TO,
-                        type: "SELL"
-                    })
-                });
-
-                await sendLog(`✅ Реквизит выключен для folder_name: ${folder_name}`);
-            } catch (err) {
-                await sendLog(`❌ Ошибка при выключении реквизита: ${err.message}`);
-            }
-
-            // ------------------- Таблица -------------------
-            try {
-                const sheetRes = await fetch(SHEET_WEBHOOK, {
+                await fetch(SHEET_WEBHOOK, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         type: "receive",
                         external_id: shortId,
-                        folder_name
+                        folder_name,
+                        card,
+                        amount
                     })
                 });
-
-                const sheetText = await sheetRes.text();
-                console.log("📄 SHEET RESPONSE:", sheetText);
-
-                if (sheetText.trim() === "ok") {
-                    await sendLog(`✅ external_id успешно записан в Google Sheet: ${shortId}`);
-                } else {
-                    await sendLog(`❌ Google Sheet не вернул ok: ${sheetText}`);
-                }
+                console.log(`✅ RECEIVE external_id записан в Google Sheet: ${shortId}`);
             } catch (err) {
-                await sendLog(`❌ Ошибка записи в Google Sheet: ${err.message}`);
+                await sendLog(`❌ Ошибка записи RECEIVE в Google Sheet: ${err.message}`);
             }
         }
+
+        res.send("ok");
+
+    } catch (err) {
+        console.error("❌ Ошибка на сервере:", err);
+        await sendLog(`❌ Ошибка на сервере: ${err.message}`);
+        res.send("error");
+    }
+});
+
+// ================= SERVER =================
+app.listen(3000, () => console.log("Server started on port 3000"));
 
         res.send("ok");
     } catch (err) {
