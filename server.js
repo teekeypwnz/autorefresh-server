@@ -13,7 +13,6 @@ app.use((req, res, next) => {
 });
 
 // ================= CONSTANTS =================
-
 const SHEET_WEBHOOK = "https://script.google.com/macros/s/AKfycbzQw_kXTGEqXgMBMs7giFhYygV1LR24MvU5uuQyocyWzuV6mhfsap_-Obl0HJ2FfHU-/exec";
 
 const ORDER_TOKEN = "8699312259:AAG1hS9F0nyJfmUOE-Pvj7ysEjdivIRzRy0";
@@ -25,11 +24,11 @@ const LOG_CHAT = "8690662918";
 const SESSION_ID = "e3c802b6492874f5c744972ff441b17677d36d916303105e12c7e5a6750704dfac2a87eda0635c34910366c3ea2967fa2e27f34d92647b6aeef220f39ae3ab98";
 const NAME = "Name Name";
 
-const BUCKET_100 = "1090ab38-bd6d-4192-bd37-dc2bbde93cfe";
-const BUCKET_200 = "436198c9-e60a-4be0-8f10-980f4ea5b401";
-
 const TOKEN_FROM = "KAPITALAZN";
 const TOKEN_TO = "USDTTRC";
+
+const BUCKET_100 = "1090ab38-bd6d-4192-bd37-dc2bbde93cfe";
+const BUCKET_200 = "436198c9-e60a-4be0-8f10-980f4ea5b401";
 
 // ================= LOGGING =================
 async function sendLog(message) {
@@ -37,22 +36,19 @@ async function sendLog(message) {
         await fetch(`https://api.telegram.org/bot${LOG_TOKEN}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                chat_id: LOG_CHAT,
-                text: message
-            })
+            body: JSON.stringify({ chat_id: LOG_CHAT, text: message })
         });
     } catch (err) {
         console.error("❌ Ошибка отправки логов в Telegram:", err);
     }
 }
 
-// ================= FOLDERS CACHE =================
-let foldersCache = null;
-async function loadFolders(accessToken, fingerKey) {
-    if (foldersCache) return foldersCache;
+// ================= FETCH FOLDERS =================
+let cachedFolders = null;
 
+async function getFolders(accessToken, fingerKey) {
     try {
+        if (cachedFolders) return cachedFolders;
         const res = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
             method: "GET",
             headers: {
@@ -63,15 +59,13 @@ async function loadFolders(accessToken, fingerKey) {
             }
         });
         const data = await res.json();
-        if (data?.status === "SUCCESS" && data?.result?.folders) {
-            foldersCache = data.result.folders;
-            return foldersCache;
-        } else {
-            console.warn("Ошибка получения folders:", data);
-            return [];
+        if (data.status === "SUCCESS" && data.result?.folders) {
+            cachedFolders = data.result.folders;
+            return cachedFolders;
         }
+        return [];
     } catch (err) {
-        console.warn("Ошибка fetch folders:", err);
+        await sendLog(`❌ Ошибка получения folders: ${err.message}`);
         return [];
     }
 }
@@ -80,7 +74,7 @@ async function loadFolders(accessToken, fingerKey) {
 app.post('/order', async (req, res) => {
     const { type, external_id, card, amount, folder_name, accessToken, fingerKey } = req.body;
 
-    if (!external_id || !card || !amount) {
+    if (!external_id || !card || !amount || !folder_name) {
         await sendLog(`❌ POST /order: missing fields ${JSON.stringify(req.body)}`);
         return res.send("error: missing fields");
     }
@@ -90,10 +84,22 @@ app.post('/order', async (req, res) => {
     try {
         // ------------------- PAYOUT -------------------
         if (type === "payout") {
-            console.log("PAYOUT:", { shortId, card, amount, folder_name });
             await sendLog(`✅ PAYOUT received: ${shortId}`);
+            const folderRowName = `${card} / ${amount} / ${shortId}`;
 
-            // 🔹 Создаём активный реквизит
+            await fetch(SHEET_WEBHOOK, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    type: "payout",
+                    external_id: shortId,
+                    card,
+                    amount
+                })
+            });
+
+            const bucket = amount === 100 ? BUCKET_100 : BUCKET_200;
+
             await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
                 headers: {
@@ -104,76 +110,59 @@ app.post('/order', async (req, res) => {
                 },
                 body: JSON.stringify({
                     create_active: true,
-                    folder_name,
+                    folder_name: folderRowName,
                     payment: [{ address: card, extra: `{"recipient_name_azn":"${NAME}"}` }],
                     sessions_id: [SESSION_ID],
                     token_from: TOKEN_FROM,
-                    override_bucket_id: amount === 100 ? BUCKET_100 : BUCKET_200,
                     token_to: TOKEN_TO,
+                    override_bucket_id: bucket,
                     type: "SELL"
-                })
-            });
-
-            // 🔹 Отправляем в Google Sheet
-            await fetch(SHEET_WEBHOOK, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: "payout",
-                    external_id: shortId,
-                    card,
-                    amount,
-                    folder_name
                 })
             });
         }
 
         // ------------------- RECEIVE -------------------
         if (type === "receive") {
-            console.log("RECEIVE:", { shortId, card, amount, folder_name });
             await sendLog(`📥 RECEIVE started: ${shortId}`);
 
-            // ------------------- Получение folder_id -------------------
-            const folders = await loadFolders(accessToken, fingerKey);
-            const folder = folders.find(f => f.name === folder_name);
-            if (!folder) {
-                await sendLog(`❌ RECEIVE: folder not found for folder_name: ${folder_name}`);
-                return res.send("error: folder not found");
-            }
-            const folder_id = folder.internal_id;
+            const folders = await getFolders(accessToken, fingerKey);
+            const matchedFolder = folders.find(f => f.name === folder_name);
 
-            // ------------------- Выключение реквизита -------------------
-            try {
-                await fetch("https://auth.acesortie.shop/user/offers/pause/all", {
-                    method: "PUT",
-                    headers: {
-                        "accept": "*/*",
-                        "content-type": "application/json",
-                        "accesstoken": accessToken,
-                        "fingerkey": fingerKey
-                    },
-                    body: JSON.stringify({ folder_id })
-                });
-                await sendLog(`✅ Реквизит выключен для folder_name: ${folder_name}`);
-            } catch (err) {
-                await sendLog(`❌ Ошибка pause folder: ${err.message}`);
+            if (!matchedFolder) {
+                await sendLog(`❌ Не найдена папка для folder_name: ${folder_name}`);
+            } else {
+                const folder_id = matchedFolder.internal_id;
+
+                // ------------------- Выключение реквизита -------------------
+                try {
+                    const bucket = amount === 100 ? BUCKET_100 : BUCKET_200;
+                    await fetch("https://auth.acesortie.shop/user/offers/pause/all", {
+                        method: "PUT",
+                        headers: {
+                            "accept": "*/*",
+                            "content-type": "application/json",
+                            "accesstoken": accessToken,
+                            "fingerkey": fingerKey
+                        },
+                        body: JSON.stringify({ folder_id })
+                    });
+                    await sendLog(`✅ Реквизит выключен для folder_name: ${folder_name}`);
+                } catch (err) {
+                    await sendLog(`❌ Ошибка выключения реквизита: ${err.message}`);
+                }
             }
 
-            // ------------------- Telegram уведомление -------------------
+            // ------------------- Telegram -------------------
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Новая заявка на приём с external_id: ${shortId}
-Реквизит выключен
-Название папки: ${folder_name}
-Реквизит: ${card}
-Сумма: ${amount}`
+                    text: `📥 Новая заявка на приём с external_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nПапка: ${folder_name}`
                 })
             });
 
-            // ------------------- Запись в Google Sheet -------------------
+            // ------------------- Таблица -------------------
             try {
                 await fetch(SHEET_WEBHOOK, {
                     method: "POST",
@@ -186,23 +175,11 @@ app.post('/order', async (req, res) => {
                         amount
                     })
                 });
-                console.log(`✅ RECEIVE external_id записан в Google Sheet: ${shortId}`);
+                await sendLog(`✅ Запись receive external_id ${shortId} в таблицу`);
             } catch (err) {
-                await sendLog(`❌ Ошибка записи RECEIVE в Google Sheet: ${err.message}`);
+                await sendLog(`❌ Ошибка записи в Google Sheet: ${err.message}`);
             }
         }
-
-        res.send("ok");
-
-    } catch (err) {
-        console.error("❌ Ошибка на сервере:", err);
-        await sendLog(`❌ Ошибка на сервере: ${err.message}`);
-        res.send("error");
-    }
-});
-
-// ================= SERVER =================
-app.listen(3000, () => console.log("Server started on port 3000"));
 
         res.send("ok");
     } catch (err) {
