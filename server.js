@@ -43,12 +43,17 @@ async function sendLog(message) {
     }
 }
 
-// ================= FETCH FOLDERS =================
+// ================= FOLDERS CACHE =================
 let cachedFolders = null;
+let lastFoldersUpdate = 0;
 
 async function getFolders(accessToken, fingerKey) {
     try {
-        if (cachedFolders) return cachedFolders;
+        const now = Date.now();
+        if (cachedFolders && now - lastFoldersUpdate < 3 * 60 * 1000) {
+            return cachedFolders;
+        }
+
         const res = await fetch("https://auth.acesortie.shop/user/payment_details/folders?", {
             method: "GET",
             headers: {
@@ -58,9 +63,11 @@ async function getFolders(accessToken, fingerKey) {
                 "fingerkey": fingerKey
             }
         });
+
         const data = await res.json();
         if (data.status === "SUCCESS" && data.result?.folders) {
             cachedFolders = data.result.folders;
+            lastFoldersUpdate = now;
             return cachedFolders;
         }
         return [];
@@ -74,7 +81,7 @@ async function getFolders(accessToken, fingerKey) {
 app.post('/order', async (req, res) => {
     const { type, external_id, card, amount, folder_name, accessToken, fingerKey } = req.body;
 
-    if (!external_id || !card || !amount || !folder_name) {
+    if (!external_id || !card || !amount) {
         await sendLog(`❌ POST /order: missing fields ${JSON.stringify(req.body)}`);
         return res.send("error: missing fields");
     }
@@ -86,21 +93,17 @@ app.post('/order', async (req, res) => {
         if (type === "payout") {
             await sendLog(`✅ PAYOUT received: ${shortId}`);
             const folderRowName = `${card} / ${amount} / ${shortId}`;
+            const bucket = amount === 100 ? BUCKET_100 : BUCKET_200;
 
+            // 1. Google Sheet
             await fetch(SHEET_WEBHOOK, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    type: "payout",
-                    external_id: shortId,
-                    card,
-                    amount
-                })
+                body: JSON.stringify({ type: "payout", external_id: shortId, card, amount })
             });
 
-            const bucket = amount === 100 ? BUCKET_100 : BUCKET_200;
-
-            await fetch("https://auth.acesortie.shop/user/offers", {
+            // 2. Создание реквизита
+            const createResp = await fetch("https://auth.acesortie.shop/user/offers", {
                 method: "POST",
                 headers: {
                     "accept": "*/*",
@@ -119,11 +122,28 @@ app.post('/order', async (req, res) => {
                     type: "SELL"
                 })
             });
+            const createText = await createResp.text();
+            console.log("📦 Ответ создания реквизита:", createText);
+
+            // 3. Telegram
+            await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    chat_id: ORDER_CHAT,
+                    text: `✅ PAYOUT external_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}`
+                })
+            });
         }
 
         // ------------------- RECEIVE -------------------
         if (type === "receive") {
             await sendLog(`📥 RECEIVE started: ${shortId}`);
+
+            if (!folder_name) {
+                await sendLog(`❌ folder_name отсутствует в receive: ${shortId}`);
+                return res.send("error: missing folder_name");
+            }
 
             const folders = await getFolders(accessToken, fingerKey);
             const matchedFolder = folders.find(f => f.name === folder_name);
@@ -133,9 +153,8 @@ app.post('/order', async (req, res) => {
             } else {
                 const folder_id = matchedFolder.internal_id;
 
-                // ------------------- Выключение реквизита -------------------
+                // 1. Выключение реквизита
                 try {
-                    const bucket = amount === 100 ? BUCKET_100 : BUCKET_200;
                     await fetch("https://auth.acesortie.shop/user/offers/pause/all", {
                         method: "PUT",
                         headers: {
@@ -152,32 +171,26 @@ app.post('/order', async (req, res) => {
                 }
             }
 
-            // ------------------- Telegram -------------------
+            // 2. Telegram
             await fetch(`https://api.telegram.org/bot${ORDER_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     chat_id: ORDER_CHAT,
-                    text: `📥 Новая заявка на приём с external_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nПапка: ${folder_name}`
+                    text: `📥 RECEIVE external_id: ${shortId}\nРеквизит: ${card}\nСумма: ${amount}\nПапка: ${folder_name}`
                 })
             });
 
-            // ------------------- Таблица -------------------
+            // 3. Google Sheet (только столбец G)
             try {
                 await fetch(SHEET_WEBHOOK, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        type: "receive",
-                        external_id: shortId,
-                        folder_name,
-                        card,
-                        amount
-                    })
+                    body: JSON.stringify({ type: "receive", external_id: shortId, folder_name, card, amount })
                 });
-                await sendLog(`✅ Запись receive external_id ${shortId} в таблицу`);
+                await sendLog(`✅ Запись receive external_id ${shortId} в Google Sheet (столбец G)`);
             } catch (err) {
-                await sendLog(`❌ Ошибка записи в Google Sheet: ${err.message}`);
+                await sendLog(`❌ Ошибка записи receive в Google Sheet: ${err.message}`);
             }
         }
 
